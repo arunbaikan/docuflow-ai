@@ -1,5 +1,6 @@
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
-import { saveAs } from "file-saver";
+import fileSaver from "file-saver";
+const { saveAs } = fileSaver;
 import { jsPDF } from "jspdf";
 import type { Block } from "./templates";
 
