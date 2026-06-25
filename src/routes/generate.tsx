@@ -12,6 +12,7 @@ import { applicantStore, draftStore, newId, ventureStore } from "@/lib/storage";
 import { TEMPLATES, type Applicant, type TemplateId } from "@/lib/types";
 import { buildDocument } from "@/lib/templates";
 import { exportDocx, exportPdf } from "@/lib/export";
+import { buildTemplateData, exportFromTemplate } from "@/lib/docxtemplate";
 import { ArrowLeft, ArrowRight, Building2, Check, FileDown, FileText, Plus, Sparkles } from "lucide-react";
 
 const searchSchema = z.object({
@@ -338,18 +339,37 @@ function Step4({
           const t = TEMPLATES.find((x) => x.id === id)!;
           const doc = buildDocument(id, { venture, applicant, p: property });
           const fname = `${t.name.replace(/[^A-Za-z0-9]+/g, "_")}_${property.flatNo || "draft"}`;
+          const tplData = buildTemplateData(venture, applicant, property);
           return (
             <Card key={id}>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle className="text-base"><FileText className="mr-2 inline h-4 w-4" />{t.name}</CardTitle>
-                  <CardDescription>{doc.blocks.length} blocks · {doc.title}</CardDescription>
+                  <CardDescription>
+                    {id === "dsd"
+                      ? "Prose fallback (original is legacy .doc — re-save as .docx to enable template render)"
+                      : "Renders from your original .docx template — formatting preserved"}
+                  </CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => exportPdf(doc.title, doc.blocks, fname)}>
                     <FileDown className="mr-2 h-4 w-4" /> PDF
                   </Button>
-                  <Button size="sm" onClick={() => exportDocx(doc.title, doc.blocks, fname)}>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        if (id === "dsd") {
+                          exportDocx(doc.title, doc.blocks, fname);
+                        } else {
+                          await exportFromTemplate(id, tplData, fname);
+                        }
+                      } catch (err) {
+                        console.error("Template render failed, falling back to prose:", err);
+                        exportDocx(doc.title, doc.blocks, fname);
+                      }
+                    }}
+                  >
                     <FileDown className="mr-2 h-4 w-4" /> DOCX
                   </Button>
                 </div>
