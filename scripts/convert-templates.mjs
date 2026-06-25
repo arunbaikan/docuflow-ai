@@ -260,9 +260,68 @@ function applyReplacements(xml, repl) {
       const re2 = new RegExp(literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
       xml = xml.replace(re2, placeholder);
     }
+    // Last resort: paragraph-level cross-run replacement
+    if (xml === before) {
+      xml = replaceAcrossRuns(xml, literal, placeholder);
+    }
     hits.push({ literal, placeholder, hit: xml !== before });
   }
   return { xml, hits };
+}
+
+/** Walk each <w:p>, concatenate all <w:t> contents, and if the literal is found
+ *  in that concatenation, rewrite the spanning <w:t> nodes:
+ *    - first overlapping <w:t> gets [prefix + placeholder]
+ *    - intermediate <w:t>s are emptied
+ *    - last overlapping <w:t> keeps [suffix]
+ *  Run formatting (<w:rPr>) is preserved because we only edit text inside <w:t>. */
+function replaceAcrossRuns(xml, literal, placeholder) {
+  const escapedLit = literal
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
+    const tRe = /<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>/g;
+    const nodes = [];
+    let m;
+    while ((m = tRe.exec(para)) !== null) {
+      nodes.push({ start: m.index, end: m.index + m[0].length, attrs: m[1] || "", text: m[2] });
+    }
+    if (!nodes.length) return para;
+    const flat = nodes.map((n) => n.text).join("");
+    let idx = flat.indexOf(escapedLit);
+    if (idx < 0) idx = flat.indexOf(literal);
+    if (idx < 0) return para;
+    const matchLen = (flat.indexOf(escapedLit) >= 0 ? escapedLit : literal).length;
+    // Map flat indices to nodes
+    let pos = 0;
+    let startNode = -1, startOff = 0, endNode = -1, endOff = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const len = nodes[i].text.length;
+      if (startNode < 0 && idx < pos + len) { startNode = i; startOff = idx - pos; }
+      if (idx + matchLen <= pos + len) { endNode = i; endOff = idx + matchLen - pos; break; }
+      pos += len;
+    }
+    if (startNode < 0 || endNode < 0) return para;
+    // Build new node texts
+    const newNodes = nodes.map((n) => ({ ...n }));
+    if (startNode === endNode) {
+      const n = newNodes[startNode];
+      n.text = n.text.slice(0, startOff) + placeholder + n.text.slice(endOff);
+    } else {
+      newNodes[startNode].text = newNodes[startNode].text.slice(0, startOff) + placeholder;
+      for (let i = startNode + 1; i < endNode; i++) newNodes[i].text = "";
+      newNodes[endNode].text = newNodes[endNode].text.slice(endOff);
+    }
+    // Splice replacements back into the paragraph, last-to-first
+    let out = para;
+    for (let i = newNodes.length - 1; i >= 0; i--) {
+      const n = newNodes[i];
+      const replacement = `<w:t${n.attrs || ' xml:space="preserve"'}>${n.text}</w:t>`;
+      out = out.slice(0, n.start) + replacement + out.slice(n.end);
+    }
+    return out;
+  });
 }
 
 function convertOne(id, cfg) {
